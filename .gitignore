@@ -1,0 +1,14 @@
+/blib
+/pm_to_blib
+/META.yml
+/README
+/Makefile.PL
+/Build
+/_build
+/*.tar.gz
+/MANIFEST.bak
+/cover_db
+/tmp/*
+/configure-stamp
+/build-stamp
+/HTTP-DAV-Browse-*
