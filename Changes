@@ -1,6 +1,9 @@
 Revision history for HTTP-DAV-Browse
 
-0.02    16 Jul 2008
+0.04    16 Jul 2008
+    * examples added
+
+0.03    16 Jul 2008
     * ls_detailed() returns array not hash
 
 0.01    Date/time

@@ -29,7 +29,7 @@ use MooseX::StrictConstructor;
 use HTTP::DAV 0.38;
 use URI;
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 =head1 PROPERTIES
 

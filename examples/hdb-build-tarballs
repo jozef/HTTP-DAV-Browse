@@ -1,0 +1,209 @@
+#!/usr/bin/perl
+
+=head1 NAME
+
+hdb-build-tarballs - discover SVN tags/ folders and build tarballs from the lastes tag inside
+
+=head1 SYNOPSIS
+
+    hdb-build-tarballs --status-file=tmp/visited-tags.json --output-folder=tmp/tarballs http://svn/repo/
+    
+        --new-status     create new status file or start from scratch
+        --status-file    location of status file
+        --output-folder  folder where tarballs will be put
+        --lookin         colon separated list of folders where to look for project/tags/
+                         (default is to look in the base url)
+    
+    Note: for repositories with basic authentication set DAVUSER, DAVPASS and DAVREALM
+          environment variables
+
+=head1 DESCRIPTION
+
+The purpose is to discover SVN tags/ folders and then find the latest tag
+folder inside (based on revision version). This folder will be checkedout
+to temporary folder where `perl Build.PL && perl Build distmeta && perl Build dist`
+will be executed to get tarball. This tarball will be then copied to
+--output-folder.
+
+=cut
+
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use Pod::Usage;
+use HTTP::DAV::Browse;
+use File::Spec;
+use JSON::XS;
+use File::Slurp 'read_file', 'write_file';
+use File::Temp 0.21;
+
+exit main();
+
+sub main {
+    my $help;
+    my $status_filename = 'visited-tags.json';
+    my $output_folder   = File::Spec->curdir();
+    my $new_status      = 0;
+    my $lookin          = '';
+    GetOptions(
+        'help|h'            => \$help,
+        'status-file|s=s'   => \$status_filename,
+        'new-status|n'      => \$new_status,
+        'output-folder|f=s' => \$output_folder,
+        'lookin|l=s'        => \$lookin,
+    ) or pod2usage;
+    pod2usage if $help;
+    $output_folder   = File::Spec->rel2abs($output_folder);
+    $status_filename = File::Spec->rel2abs($status_filename);
+    
+    my $base_uri = shift @ARGV;
+    pod2usage if not $base_uri;
+
+    # create output folder if not exists
+    mkdir($output_folder)
+        if not -d $output_folder;
+
+    my $json = JSON::XS->new->pretty->utf8;
+    my $browser = HTTP::DAV::Browse->new(
+        'base_uri' => $base_uri,
+        'username' => $ENV{'DAVUSER'},
+        'password' => $ENV{'DAVPW'},
+        'realm'    => $ENV{'DAVREALM'},
+    );
+    
+    my %visited_status = (
+        $new_status
+        ? ()
+        : %{$json->decode(scalar read_file($status_filename))}
+    );
+
+    my @lookin = split(/\s*,\s*/, $lookin);
+    @lookin = ('')
+        if not @lookin;
+    
+    foreach my $folder (@lookin) {
+        my @folders =
+            grep { not exists $visited_status{$_} }    # only interrested in not jet discovered folders
+            map { $folder.$_.'tags/' }                 # prefix with current folder
+            grep { $_ =~ m{/$} }                       # only interrested in folders
+            $browser->ls($folder)                      # get list of all files
+        ;
+
+        # loop through newly discovered folders
+        foreach my $folder (@folders) {
+            my @tags =
+                grep { $_->{'rel_uri'} =~ m{/$} }     # only interrested in folders
+                eval {                                # eval as it will throw an exception if there is no tags folder
+                    $browser->ls_detailed($folder)    # get list of tags
+                }
+            ;
+            
+            # no tags no interrest
+            if (not @tags) {
+                $visited_status{$folder} = undef;
+                next;
+            }
+            
+            # found tags, mark for processing
+            $visited_status{$folder} = {
+                'revision' => 0,
+                'author'   => 'anonymous',
+            };
+        }
+    }
+
+    # write back the status file
+    write_file($status_filename, $json->encode(\%visited_status));
+    
+    foreach my $tag_folder (keys %visited_status) {
+        # skip non tags folders
+        next if not defined $visited_status{$tag_folder};
+
+        # get the lastest tag (one with the greates revision number)
+        my ($last_tag) =
+            sort { $b->{'version-name'} <=> $a->{'version-name'} }    # sort desc by revision number
+            grep { $_->{'rel_uri'} =~ m{/$} }                         # only interrested in folders
+            eval {                                                    # eval as it will throw an exception if there is no tags folder
+                $browser->ls_detailed($tag_folder)                    # get list of tags
+            }
+        ;
+        
+        # no folders or list fail => nothing to do
+        next if not $last_tag;
+
+        # process 
+        if ($last_tag > $visited_status{$tag_folder}->{'revision'}) {
+            my $last_tag_path = $tag_folder.$last_tag->{'rel_uri'}->as_string;
+            
+            my $creator_email = $last_tag->{'creator-displayname'} ? $last_tag->{'creator-displayname'}.'@mms.ag' : 'devnull@ba.pm.org';
+            print 'processing ', $last_tag_path, ' made by ', $creator_email, "\n";
+            
+            # create tarball
+            eval {
+                make_tarball($base_uri.$last_tag_path, $output_folder);
+            };
+            
+            print '`perl Build dist` failed - ', $@
+                if ($@);
+            
+            # mark processed
+            $visited_status{$tag_folder}->{'revision'} = $last_tag->{'version-name'};
+            $visited_status{$tag_folder}->{'author'}   = $last_tag->{'creator-displayname'};
+            
+            # write back the status file
+            write_file($status_filename, $json->encode(\%visited_status));
+        }
+    }
+    
+    # write back the status file
+    write_file($status_filename, $json->encode(\%visited_status));
+    
+    return 0;
+}
+
+
+=head1 Perl functions
+
+=head2 make_tarball($url, $output_folder)
+
+Functions will checkout C<$url> try to make tarball and copy it to
+C<$output_folder>. Throws exceptions on failures.
+
+=cut
+
+sub make_tarball {
+    my $url           = shift;
+    my $output_folder = shift;
+    
+    my $start_dir = File::Spec->curdir();
+    
+    my $file_temp_dir = File::Temp->newdir();;
+    my $tmp_folder = $file_temp_dir->dirname();
+    #$tmp_folder = '/tmp/build-test/';
+
+    chdir($tmp_folder) or die $!;
+    
+    # checkout the trunk
+    system('svn', 'co', '--quiet', $url, $tmp_folder) and die $!;
+    
+    # nothing to do if there is no Build.PL
+    die 'no Build.PL'
+        if not -e 'Build.PL';
+    
+    system('perl', 'Build.PL') and die $!;
+    system('perl', 'Build', 'distmeta') and die $!;    
+    system('perl', 'Build', 'dist') and die $!;    
+    system('cp *.tar.gz '.$output_folder) and die $!;
+    
+    chdir($start_dir);
+}
+
+__END__
+
+=head1 AUTHOR
+
+Jozef Kutej, C<< <jkutej at cpan.org> >>
+
+=cut
