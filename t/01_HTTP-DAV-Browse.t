@@ -29,12 +29,14 @@ sub main {
     my $response = $ua->get($url);
     
     SKIP: {
-        skip 'no internet connection, bad luck today', 2
+        skip 'no internet connection, bad luck today', 3
             if not $response->is_success;
 
-        my %lsd = $browser->ls_detailed('/');
-        ok(scalar $lsd{'SVGraph/'}, 'trunk should have "SVGraph/" folder');
-        cmp_ok($lsd{'SVGraph/'}->{'version-name'},'>=', 69, 'revision should be >= 69');
+        my @lsd = $browser->ls_detailed('');
+        my ($svgraph) = grep {$_->{'rel_uri'} eq 'SVGraph/'} @lsd;
+        $svgraph ||= {};
+        is($svgraph->{'rel_uri'}, 'SVGraph/', 'trunk should have "SVGraph/" folder');
+        cmp_ok($svgraph->{'version-name'},'>=', 69, 'revision should be >= 69');
         
         dies_ok { $browser->ls('/non-existing') } 'throw excepetion for non-existing paths';
     }

@@ -29,7 +29,7 @@ use MooseX::StrictConstructor;
 use HTTP::DAV 0.38;
 use URI;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 PROPERTIES
 
@@ -48,9 +48,9 @@ coerce 'Object.URI'
 
 has '_dav'     => (is => 'ro', isa => 'Object.HTTP.DAV', lazy => 1, default => sub { $_[0]->_dav_init });
 has 'base_uri' => (is => 'rw', isa => 'Object.URI', required => 1, coerce => 1 );
-has 'username' => (is => 'rw', isa => 'Str');
-has 'password' => (is => 'rw', isa => 'Str');
-has 'realm'    => (is => 'rw', isa => 'Str');
+has 'username' => (is => 'rw', isa => 'Str|Undef');
+has 'password' => (is => 'rw', isa => 'Str|Undef');
+has 'realm'    => (is => 'rw', isa => 'Str|Undef');
 
 =head1 METHODS
 
@@ -100,10 +100,9 @@ sub ls {
 =head2 ls_detailed($path)
 
 For given C<$path> (that is prepended by C<<$self->base_uri>>) returns
-hash of files with filenames a keys and the details as values. Example
-key => value pair:
+array of hashes with file details. Example:
 
-     'SVGraph/' => {
+     {
         'baseline-relative-path' => 'trunk/SVGraph',
         'version-name' => '69',
         'version-controlled-configuration' => '<D:href>/svgraph/!svn/vcc/default</D:href>',
@@ -137,7 +136,7 @@ sub ls_detailed {
     my $path = shift;
     
     die 'path is required argument'
-        if not $path;
+        if not defined $path;
     
     my $dav = $self->_dav;
     
@@ -153,9 +152,8 @@ sub ls_detailed {
     return
         if not $resources_list;
 
-    # return hash of rel_uri => { all properties }
+    # return array of { all properties }
     return
-        map { $_->{'rel_uri'} => $_ }
         map { $_->{'_properties'} }
         $resources_list->get_resources
     ;
