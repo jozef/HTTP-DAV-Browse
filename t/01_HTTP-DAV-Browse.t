@@ -4,7 +4,7 @@ use strict;
 use warnings;
 
 #use Test::More 'no_plan';
-use Test::More tests => 5;
+use Test::More tests => 6;
 #use Test::Differences;
 use Test::Exception;
 use LWP::UserAgent;
@@ -29,9 +29,13 @@ sub main {
     my $response = $ua->get($url);
     
     SKIP: {
-        skip 'no internet connection, bad luck today', 3
+        skip 'no internet connection, bad luck today', 4
             if not $response->is_success;
 
+        my @ls = $browser->ls('');
+        my ($svgraph_folder) = grep {$_ eq 'SVGraph/'} @ls;
+        is($svgraph_folder, 'SVGraph/', 'trunk should have "SVGraph/" folder');
+        
         my @lsd = $browser->ls_detailed('');
         my ($svgraph) = grep {$_->{'rel_uri'} eq 'SVGraph/'} @lsd;
         $svgraph ||= {};

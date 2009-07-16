@@ -29,7 +29,7 @@ use MooseX::StrictConstructor;
 use HTTP::DAV 0.38;
 use URI;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 PROPERTIES
 
@@ -92,8 +92,7 @@ Throws exception for non existing paths.
 
 sub ls {
     my $self = shift;
-    my %files = $self->ls_detailed(@_);
-    return keys %files;
+    return map { $_->{'rel_uri'} } $self->ls_detailed(@_);
 }
 
 
