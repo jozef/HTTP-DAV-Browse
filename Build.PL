@@ -26,6 +26,14 @@ my $builder = Module::Build->new(
     add_to_cleanup      => [ 'HTTP-DAV-Browse-*' ],
     create_readme       => 1,
     sign                => 1,
+    meta_merge => {
+        resources => {
+            repository => 'git://github.com/jozef/HTTP-DAV-Browse.git',
+            bugtracker =>
+            'http://rt.cpan.org/NoAuth/Bugs.html?Dist=HTTP-DAV-Browse',
+        },
+        keywords => [ qw/ http dav webdav ls folders files / ],
+    },
 );
 
 $builder->create_build_script();
