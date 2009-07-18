@@ -38,6 +38,9 @@ use File::Spec;
 use JSON::XS;
 use File::Slurp 'read_file', 'write_file';
 use File::Temp 0.21;
+use IPC::Run qw( run timeout );
+use File::Find::Rule;
+use File::Basename 'basename';
 
 exit main();
 
@@ -134,23 +137,32 @@ sub main {
         next if not $last_tag;
 
         # process 
-        if ($last_tag > $visited_status{$tag_folder}->{'revision'}) {
-            my $last_tag_path = $tag_folder.$last_tag->{'rel_uri'}->as_string;
+        if ($last_tag->{'version-name'} > $visited_status{$tag_folder}->{'revision'}) {
+            # cleanup
+            unlink($output_folder.$visited_status{$tag_folder}->{'tarball'})
+                if $visited_status{$tag_folder}->{'tarball'};
+            $visited_status{$tag_folder} = {};
             
-            my $creator_email = $last_tag->{'creator-displayname'} ? $last_tag->{'creator-displayname'}.'@mms.ag' : 'devnull@ba.pm.org';
-            print 'processing ', $last_tag_path, ' made by ', $creator_email, "\n";
+            # path to latest tag
+            my $last_tag_path = $tag_folder.$last_tag->{'rel_uri'}->as_string;            
+            print 'processing ', $last_tag_path, ' made by ', ($last_tag->{'creator-displayname'} || 'unknown'), "\n";
             
             # create tarball
-            eval {
+            my $tarball = eval {
                 make_tarball($base_uri.$last_tag_path, $output_folder);
-            };
-            
-            print '`perl Build dist` failed - ', $@
-                if ($@);
+            };            
+            if ($@) {
+                print '`perl Build dist` failed - ', $@;
+                $visited_status{$tag_folder}->{'fail'} = $@;
+            }
+            else {
+                $visited_status{$tag_folder}->{'tarball'} = $tarball;
+            }
             
             # mark processed
             $visited_status{$tag_folder}->{'revision'} = $last_tag->{'version-name'};
             $visited_status{$tag_folder}->{'author'}   = $last_tag->{'creator-displayname'};
+            $visited_status{$tag_folder}->{'tag'}      = $base_uri.$last_tag_path;
             
             # write back the status file
             write_file($status_filename, $json->encode(\%visited_status));
@@ -171,6 +183,8 @@ sub main {
 Functions will checkout C<$url> try to make tarball and copy it to
 C<$output_folder>. Throws exceptions on failures.
 
+Returns name of the created tarball.
+
 =cut
 
 sub make_tarball {
@@ -183,21 +197,51 @@ sub make_tarball {
     my $tmp_folder = $file_temp_dir->dirname();
     #$tmp_folder = '/tmp/build-test/';
 
-    chdir($tmp_folder) or die $!;
+    chdir($tmp_folder) or die 'chdir to tmp folder '.$tmp_folder.' failed: '.$!."\n";
+    
+    my $input  = '';
+    my $output = '';
     
     # checkout the trunk
-    system('svn', 'co', '--quiet', $url, $tmp_folder) and die $!;
+    my @cmd = ('svn', 'co', '--non-interactive', '--quiet', $url, $tmp_folder);
+    run \@cmd, \$input, \$output, \$output, timeout( 30*60 )
+        or die '`'.join(' ',@cmd).'` failed: '.$output."\n";
     
     # nothing to do if there is no Build.PL
-    die 'no Build.PL'
+    die 'no Build.PL'."\n"
         if not -e 'Build.PL';
     
-    system('perl', 'Build.PL') and die $!;
-    system('perl', 'Build', 'distmeta') and die $!;    
-    system('perl', 'Build', 'dist') and die $!;    
-    system('cp *.tar.gz '.$output_folder) and die $!;
+    my @cmds = (
+        [ 'perl', 'Build.PL' ],
+        [ 'perl', 'Build', 'manifest' ],
+        [ 'perl', 'Build', 'distmeta' ],
+        [ 'perl', 'Build', 'dist' ]
+    );
+    foreach my $perl_cmd (@cmds) {
+        run $perl_cmd, \$input, \$output, \$output, timeout( 5*60 )
+            or die '`'.join(' ',@{$perl_cmd}).'` failed: '.$output."\n";
+    }
+    
+    my @tarballs =
+        File::Find::Rule
+        ->file()
+        ->maxdepth(1)
+        ->name( '*.tar.gz' )
+        ->in($tmp_folder)
+    ;
+    die 'no tarball found in '.$tmp_folder."\n"
+        if not @tarballs;
+    die 'more than one tarball found '.join(', ', @tarballs)."\n"
+        if @tarballs > 1;
+
+    my $tarball = pop @tarballs;
+    @cmd = ('cp', '-f', $tarball, $output_folder);
+    run \@cmd, \$input, \$output, \$output, timeout( 5*60 )
+        or die '`'.join(' ',@cmd).'` failed: '.$output."\n";
     
     chdir($start_dir);
+    
+    return basename($tarball);
 }
 
 __END__
