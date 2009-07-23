@@ -50,15 +50,20 @@ sub main {
     my $output_folder   = File::Spec->curdir();
     my $new_status      = 0;
     my $lookin          = '';
+    my $cleanup_folder;
+    my $trunks;
     GetOptions(
         'help|h'            => \$help,
         'status-file|s=s'   => \$status_filename,
         'new-status|n'      => \$new_status,
         'output-folder|f=s' => \$output_folder,
+        'cleanup-folder|c=s' => \$cleanup_folder,
         'lookin|l=s'        => \$lookin,
+        'trunks'            => \$trunks,
     ) or pod2usage;
     pod2usage if $help;
     $output_folder   = File::Spec->rel2abs($output_folder);
+    $cleanup_folder  = ($cleanup_folder ? File::Spec->rel2abs($cleanup_folder) : $output_folder);
     $status_filename = File::Spec->rel2abs($status_filename);
     
     my $base_uri = shift @ARGV;
@@ -89,7 +94,7 @@ sub main {
     foreach my $folder (@lookin) {
         my @folders =
             grep { not exists $visited_status{$_} }    # only interrested in not jet discovered folders
-            map { $folder.$_.'tags/' }                 # prefix with current folder
+            map { $folder.$_.($trunks ? 'trunk/' : 'tags/') }                 # prefix with current folder
             grep { $_ =~ m{/$} }                       # only interrested in folders
             $browser->ls($folder)                      # get list of all files
         ;
@@ -139,12 +144,12 @@ sub main {
         # process 
         if ($last_tag->{'version-name'} > $visited_status{$tag_folder}->{'revision'}) {
             # cleanup
-            unlink($output_folder.$visited_status{$tag_folder}->{'tarball'})
+            unlink($cleanup_folder.$visited_status{$tag_folder}->{'tarball'})
                 if $visited_status{$tag_folder}->{'tarball'};
             $visited_status{$tag_folder} = {};
             
             # path to latest tag
-            my $last_tag_path = $tag_folder.$last_tag->{'rel_uri'}->as_string;            
+            my $last_tag_path = $tag_folder.($trunks ? '' : $last_tag->{'rel_uri'}->as_string);
             print 'processing ', $last_tag_path, ' made by ', ($last_tag->{'creator-displayname'} || 'unknown'), "\n";
             
             # create tarball
@@ -207,19 +212,31 @@ sub make_tarball {
     run \@cmd, \$input, \$output, \$output, timeout( 30*60 )
         or die '`'.join(' ',@cmd).'` failed: '.$output."\n";
     
-    # nothing to do if there is no Build.PL
-    die 'no Build.PL'."\n"
-        if not -e 'Build.PL';
+    my @cmds;
+    if (-e 'Build.PL') {
+        @cmds = (
+            [ 'perl', 'Build.PL' ],
+            [ 'perl', 'Build', 'manifest' ],
+            [ 'perl', 'Build', 'distmeta' ],
+            [ 'perl', 'Build', 'dist' ]
+        );
+    }
+    elsif (-e 'Makefile.PL') {
+        @cmds = (
+            [ 'perl', 'Makefile.PL' ],
+            [ 'make', 'manifest' ],
+            [ 'make', 'distmeta' ],
+            [ 'make', 'dist' ]
+        );
+    }
+    # nothing to do if there is no Build.PL or Makefile.PL
+    else {
+        chdirdie('no Build.PL or Makefile.PL'."\n");
+    }
     
-    my @cmds = (
-        [ 'perl', 'Build.PL' ],
-        [ 'perl', 'Build', 'manifest' ],
-        [ 'perl', 'Build', 'distmeta' ],
-        [ 'perl', 'Build', 'dist' ]
-    );
     foreach my $perl_cmd (@cmds) {
         run $perl_cmd, \$input, \$output, \$output, timeout( 5*60 )
-            or die '`'.join(' ',@{$perl_cmd}).'` failed: '.$output."\n";
+            or chdirdie('`'.join(' ',@{$perl_cmd}).'` failed: '.$output."\n");
     }
     
     my @tarballs =
@@ -237,11 +254,18 @@ sub make_tarball {
     my $tarball = pop @tarballs;
     @cmd = ('cp', '-f', $tarball, $output_folder);
     run \@cmd, \$input, \$output, \$output, timeout( 5*60 )
-        or die '`'.join(' ',@cmd).'` failed: '.$output."\n";
+        or chdirdie('`'.join(' ',@cmd).'` failed: '.$output."\n");
     
     chdir($start_dir);
     
     return basename($tarball);
+}
+
+sub chdirdie {
+    my $msg = shift;
+    
+    chdir(File::Spec->tmpdir());
+    die $msg;
 }
 
 __END__
