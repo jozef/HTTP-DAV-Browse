@@ -41,10 +41,13 @@ use File::Temp 0.21;
 use IPC::Run qw( run timeout );
 use File::Find::Rule;
 use File::Basename 'basename';
+use Proc::PID::File;
 
 exit main();
 
 sub main {
+    die "Already running!\n" if Proc::PID::File->running();
+    
     my $help;
     my $status_filename = 'visited-tags.json';
     my $output_folder   = File::Spec->curdir();

@@ -15,6 +15,7 @@ my $builder = Module::Build->new(
                     => 0,
         'HTTP::DAV' => 0.38,
         'URI'       => 0,
+        'Proc::PID::File' => 0,
     },
     build_requires => {
         'Test::More'      => 0,
