@@ -13,6 +13,9 @@ hdb-build-tarballs - discover SVN tags/ folders and build tarballs from the last
         --output-folder  folder where tarballs will be put
         --lookin         colon separated list of folders where to look for project/tags/
                          (default is to look in the base url)
+        --trunks         build/look for trunks instead of tags
+        --pid-dir DIR    folder where the pid file will be stored
+        --mcpani         add to CPAN::Mini::Inject
     
     Note: for repositories with basic authentication set DAVUSER, DAVPASS and DAVREALM
           environment variables
@@ -42,12 +45,11 @@ use IPC::Run qw( run timeout );
 use File::Find::Rule;
 use File::Basename 'basename';
 use Proc::PID::File;
+use File::Which 'which';
 
 exit main();
 
-sub main {
-    die "Already running!\n" if Proc::PID::File->running();
-    
+sub main {    
     my $help;
     my $status_filename = 'visited-tags.json';
     my $output_folder   = File::Spec->curdir();
@@ -55,6 +57,8 @@ sub main {
     my $lookin          = '';
     my $cleanup_folder;
     my $trunks;
+    my $pid_dir;
+    my $mcpani;
     GetOptions(
         'help|h'            => \$help,
         'status-file|s=s'   => \$status_filename,
@@ -63,11 +67,16 @@ sub main {
         'cleanup-folder|c=s' => \$cleanup_folder,
         'lookin|l=s'        => \$lookin,
         'trunks'            => \$trunks,
+        'pid-dir=s'         => \$pid_dir,
+        'mcpani'            => \$mcpani,
     ) or pod2usage;
     pod2usage if $help;
     $output_folder   = File::Spec->rel2abs($output_folder);
     $cleanup_folder  = ($cleanup_folder ? File::Spec->rel2abs($cleanup_folder) : $output_folder);
     $status_filename = File::Spec->rel2abs($status_filename);
+    $pid_dir         = File::Spec->rel2abs($pid_dir);
+
+    die "Already running!\n" if Proc::PID::File->running($pid_dir ? ('dir' => $pid_dir) : ());
     
     my $base_uri = shift @ARGV;
     pod2usage if not $base_uri;
@@ -105,7 +114,10 @@ sub main {
         # loop through newly discovered folders
         foreach my $folder (@folders) {
             my @tags =
-                grep { $_->{'rel_uri'} =~ m{/$} }     # only interrested in folders
+                grep {                                # only interrested in folders of tags
+                    $trunks
+                    || ($_->{'rel_uri'} =~ m{/$})
+                }
                 eval {                                # eval as it will throw an exception if there is no tags folder
                     $browser->ls_detailed($folder)    # get list of tags
                 }
@@ -135,7 +147,10 @@ sub main {
         # get the lastest tag (one with the greates revision number)
         my ($last_tag) =
             sort { $b->{'version-name'} <=> $a->{'version-name'} }    # sort desc by revision number
-            grep { $_->{'rel_uri'} =~ m{/$} }                         # only interrested in folders
+            grep {                                                    # only interrested in folders of tags
+                $trunks
+                || ($_->{'rel_uri'} =~ m{/$})
+            }
             eval {                                                    # eval as it will throw an exception if there is no tags folder
                 $browser->ls_detailed($tag_folder)                    # get list of tags
             }
@@ -147,7 +162,7 @@ sub main {
         # process 
         if ($last_tag->{'version-name'} > $visited_status{$tag_folder}->{'revision'}) {
             # cleanup
-            unlink($cleanup_folder.$visited_status{$tag_folder}->{'tarball'})
+            unlink(File::Spec->catfile($cleanup_folder, $visited_status{$tag_folder}->{'tarball'}))
                 if $visited_status{$tag_folder}->{'tarball'};
             $visited_status{$tag_folder} = {};
             
@@ -157,7 +172,7 @@ sub main {
             
             # create tarball
             my $tarball = eval {
-                make_tarball($base_uri.$last_tag_path, $output_folder);
+                make_tarball($base_uri.$last_tag_path, $output_folder, ($trunks ? $last_tag->{'version-name'} : ()));
             };            
             if ($@) {
                 print '`perl Build dist` failed - ', $@;
@@ -174,6 +189,29 @@ sub main {
             
             # write back the status file
             write_file($status_filename, $json->encode(\%visited_status));
+            
+            # add file via CPAN::Mini::Inject
+            if ($mcpani) {
+                my @build_daily = (
+                    $trunks
+                    ? ('-MBuild::Daily=version,'.$last_tag->{'version-name'})
+                    : ()
+                );
+                
+                my ($input, $output);
+                run [
+                    'perl',
+                    @build_daily,
+                    which('mcpani'),
+                    '--authorid',
+                    'LOCAL',
+                    '--add',
+                    '--discover-packages',
+                    '--file',
+                    File::Spec->catfile($output_folder, $tarball),
+                ], \$input, \$output, \$output, timeout( 5*60 )
+                    or chdirdie('mcpani failed: '.$output."\n");
+            }
         }
     }
     
@@ -186,7 +224,7 @@ sub main {
 
 =head1 Perl functions
 
-=head2 make_tarball($url, $output_folder)
+=head2 make_tarball($url, $output_folder, $revision)
 
 Functions will checkout C<$url> try to make tarball and copy it to
 C<$output_folder>. Throws exceptions on failures.
@@ -198,8 +236,7 @@ Returns name of the created tarball.
 sub make_tarball {
     my $url           = shift;
     my $output_folder = shift;
-    
-    my $start_dir = File::Spec->curdir();
+    my $revision      = shift;
     
     my $file_temp_dir = File::Temp->newdir();;
     my $tmp_folder = $file_temp_dir->dirname();
@@ -215,18 +252,24 @@ sub make_tarball {
     run \@cmd, \$input, \$output, \$output, timeout( 30*60 )
         or die '`'.join(' ',@cmd).'` failed: '.$output."\n";
     
+    my @build_daily = (
+        $revision
+        ? ('-MBuild::Daily=version,'.$revision)
+        : ()
+    );
+    
     my @cmds;
     if (-e 'Build.PL') {
         @cmds = (
-            [ 'perl', 'Build.PL' ],
-            [ 'perl', 'Build', 'manifest' ],
-            [ 'perl', 'Build', 'distmeta' ],
-            [ 'perl', 'Build', 'dist' ]
+            [ 'perl', @build_daily, 'Build.PL' ],
+            [ 'perl', @build_daily, 'Build', 'manifest' ],
+            [ 'perl', @build_daily, 'Build', 'distmeta' ],
+            [ 'perl', @build_daily, 'Build', 'dist' ]
         );
     }
     elsif (-e 'Makefile.PL') {
         @cmds = (
-            [ 'perl', 'Makefile.PL' ],
+            [ 'perl', @build_daily, 'Makefile.PL' ],
             [ 'make', 'manifest' ],
             [ 'make', 'distmeta' ],
             [ 'make', 'dist' ]
@@ -259,7 +302,7 @@ sub make_tarball {
     run \@cmd, \$input, \$output, \$output, timeout( 5*60 )
         or chdirdie('`'.join(' ',@cmd).'` failed: '.$output."\n");
     
-    chdir($start_dir);
+    chdir(File::Spec->tmpdir());
     
     return basename($tarball);
 }
