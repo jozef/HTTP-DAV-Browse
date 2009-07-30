@@ -186,6 +186,7 @@ sub main {
             $visited_status{$tag_folder}->{'revision'} = $last_tag->{'version-name'};
             $visited_status{$tag_folder}->{'author'}   = $last_tag->{'creator-displayname'};
             $visited_status{$tag_folder}->{'tag'}      = $base_uri.$last_tag_path;
+            $visited_status{$tag_folder}->{'time'}     = time();
             
             # write back the status file
             write_file($status_filename, $json->encode(\%visited_status));
@@ -262,6 +263,7 @@ sub make_tarball {
     if (-e 'Build.PL') {
         @cmds = (
             [ 'perl', @build_daily, 'Build.PL' ],
+            [ 'rm', '-f', 'MANIFEST' ],
             [ 'perl', @build_daily, 'Build', 'manifest' ],
             [ 'perl', @build_daily, 'Build', 'distmeta' ],
             [ 'perl', @build_daily, 'Build', 'dist' ]
@@ -270,6 +272,7 @@ sub make_tarball {
     elsif (-e 'Makefile.PL') {
         @cmds = (
             [ 'perl', @build_daily, 'Makefile.PL' ],
+            [ 'rm', '-f', 'MANIFEST' ],
             [ 'make', 'manifest' ],
             [ 'make', 'distmeta' ],
             [ 'make', 'dist' ]
