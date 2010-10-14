@@ -37,6 +37,7 @@ my $builder = Module::Build->new(
         'LWP::UserAgent'  => 0,
     },
     script_files => [
+        'script/hdb-build-tarballs',
     ],
     add_to_cleanup      => [ 'HTTP-DAV-Browse-*' ],
     create_readme       => 1,

@@ -28,11 +28,8 @@
 \#$
 \b\.#
 
-# avaid debian stuff
-^build-stamp$
-^configure-stamp$
-^debian/
-^etc/
-
 ^tmp/
 .*\.tar\.gz
+^MYMETA.yml$
+^HTTP-DAV-Browse-
+

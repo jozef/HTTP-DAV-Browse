@@ -1,7 +1,8 @@
+/Makefile
 /blib
 /pm_to_blib
 /META.yml
-/README
+/MYMETA.yml
 /Makefile.PL
 /Build
 /_build
@@ -9,6 +10,4 @@
 /MANIFEST.bak
 /cover_db
 /tmp/*
-/configure-stamp
-/build-stamp
 /HTTP-DAV-Browse-*
