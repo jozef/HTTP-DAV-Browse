@@ -2,7 +2,7 @@
 
 =head1 NAME
 
-hdb-build-tarballs - discover SVN tags/ folders and build tarballs from the lastes tag inside
+hdb-build-tarballs - discover Subversion tags/ folders and build tarballs from the lastes tag inside
 
 =head1 SYNOPSIS
 

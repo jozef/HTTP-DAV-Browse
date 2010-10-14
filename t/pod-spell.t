@@ -20,5 +20,6 @@ add_stopwords(qw(
 	RT
 	CPAN
 	AnnoCPAN
+	WebDAV
 ));
 all_pod_files_spelling_ok();

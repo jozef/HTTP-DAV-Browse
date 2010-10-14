@@ -12,12 +12,12 @@ HTTP::DAV::Browse - browse the WebDAV tree
 
 =head1 DESCRIPTION
 
-For the moment L<HTTP::DAV::Browse> allows to list WebDav folders and
+For the moment L<HTTP::DAV::Browse> allows to list WebDAV folders and
 gather detailed information (properties) about the files inside.
 
-Can be used on Subverion WebDAV repositories.
+Can be used on Subversion WebDAV repositories.
 
-NOTE: for our https+password protected SVN repository, I hat to set all
+NOTE: for our https+password protected Subversion repository, I hat to set all
 username+password+realm to make it work and not complain that the
 requests are not authenticated.
 
@@ -29,7 +29,7 @@ use MooseX::StrictConstructor;
 use HTTP::DAV 0.38;
 use URI;
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 =head1 PROPERTIES
 
