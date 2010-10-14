@@ -192,7 +192,7 @@ sub main {
             write_file($status_filename, $json->encode(\%visited_status));
             
             # add file via CPAN::Mini::Inject
-            if ($mcpani) {
+            if ($mcpani and $visited_status{$tag_folder}->{'tarball'}) {
                 my @build_daily = (
                     $trunks
                     ? ('-MBuild::Daily=version,'.$last_tag->{'version-name'})
